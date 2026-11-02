@@ -4,12 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#101113" />
-  <title>丰田 RAV4 · 3D Viewer</title>
+  <title>3D 展厅</title>
   <link rel="stylesheet" href="/src/style.css" />
 </head>
-<body>
+<body class="picking">
   <div id="app">
     <canvas id="scene"></canvas>
+
+    <div class="picker" id="picker">
+      <div class="picker-inner">
+        <div class="picker-eyebrow">SELECT A CAR</div>
+        <h2 class="picker-title">选择车辆</h2>
+        <p class="picker-sub">选好后再加载 3D 模型</p>
+        <div class="picker-grid" id="pickerGrid" role="group" aria-label="车辆选择"></div>
+      </div>
+    </div>
 
     <header class="hud-title">
       <div class="eyebrow">INTERACTIVE 3D</div>

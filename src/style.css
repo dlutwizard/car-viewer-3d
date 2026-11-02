@@ -838,6 +838,105 @@ body {
   }
 }
 
+/* ---------- Car picker ---------- */
+
+body.picking .hud-title,
+body.picking .hud-mark,
+body.picking .toolbar,
+body.picking .car-switch,
+body.picking .hint,
+body.picking .loader {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.picker {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 38%, rgba(28, 170, 217, 0.09), transparent 58%),
+    #0e0f11;
+  transition: opacity 0.45s ease;
+}
+
+.picker.hide {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.picker-inner {
+  width: min(92vw, 760px);
+  text-align: center;
+}
+
+.picker-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--accent);
+}
+
+.picker-eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.picker-title {
+  margin: 14px 0 0;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  color: #fff;
+}
+
+.picker-sub {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 34px;
+}
+
+.picker-grid .car-card {
+  width: 200px;
+}
+
+@media (max-width: 720px) {
+  .picker {
+    padding: 20px 14px;
+  }
+
+  .picker-grid {
+    gap: 10px;
+    margin-top: 26px;
+  }
+
+  .picker-grid .car-card {
+    width: min(44vw, 160px);
+  }
+}
+
 /* ---------- Loader ---------- */
 
 .loader {
