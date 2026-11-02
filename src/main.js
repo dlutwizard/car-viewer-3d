@@ -953,20 +953,213 @@ function makeSkinSurface(ring) {
   return { zAt };
 }
 
+/* ---------- 国产车牌贴图：浏览器端 Canvas 生成 ---------- */
+
+const PLATE_W = 2200;
+const PLATE_H = 700;
+const PLATE_CELL = 225; // 45mm 字格
+const PLATE_GAP = 60; // 12mm 字间距
+const PLATE_BIG_GAP = 170; // 2/3 位之间 34mm（含分隔点）
+const PLATE_CHAR_H = 450; // 90mm 字高
+const PLATE_DOT = 50; // 10mm 分隔点
+const PLATE_RE = /^[\u4e00-\u9fa5][A-Z][A-Z0-9]{5}$/;
+const PLATE_DEFAULT = '蒙A88888';
+const PLATE_STORE_KEY = 'cnPlateNo';
+
+function readPlateNumber() {
+  try {
+    const v = localStorage.getItem(PLATE_STORE_KEY);
+    if (v && PLATE_RE.test(v)) return v;
+  } catch {
+    /* 隐私模式下 localStorage 不可用 */
+  }
+  return PLATE_DEFAULT;
+}
+
+let cnPlateNumber = readPlateNumber();
 let cnPlateMaps = null;
 
-function getCnPlateMaps() {
-  if (cnPlateMaps) return cnPlateMaps;
-  const loader = new THREE.TextureLoader();
+function plateCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+}
+
+function plateLatinFont(px) {
+  return `${px}px "PlateChar", "Arial Narrow", Arial, sans-serif`;
+}
+
+function plateCjkFont(px) {
+  return `700 ${px}px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "WenQuanYi Micro Hei", sans-serif`;
+}
+
+// 按实际墨迹包围盒取字形，再等比缩放到字格
+function plateGlyph(ch, font) {
+  const probe = plateCanvas(8, 8).getContext('2d');
+  probe.font = font;
+  const m = probe.measureText(ch);
+  const pad = 6;
+  const w = Math.max(1, Math.ceil(m.actualBoundingBoxLeft + m.actualBoundingBoxRight));
+  const h = Math.max(1, Math.ceil(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent));
+  const c = plateCanvas(w + pad * 2, h + pad * 2);
+  const g = c.getContext('2d');
+  g.font = font;
+  g.fillStyle = '#fff';
+  g.fillText(ch, m.actualBoundingBoxLeft + pad, m.actualBoundingBoxAscent + pad);
+  return { canvas: c, w, h, pad };
+}
+
+function stampPlateGlyph(ctx, glyph, cellX, targetW, targetH) {
+  const sx = targetW / glyph.w;
+  const sy = targetH / glyph.h;
+  const x = cellX + (PLATE_CELL - targetW) / 2 - glyph.pad * sx;
+  const y = (PLATE_H - PLATE_CHAR_H) / 2 + (PLATE_CHAR_H - targetH) / 2 - glyph.pad * sy;
+  ctx.drawImage(glyph.canvas, x, y, (glyph.w + glyph.pad * 2) * sx, (glyph.h + glyph.pad * 2) * sy);
+}
+
+function drawPlateInk(ctx, number) {
+  const total = PLATE_CELL * 7 + PLATE_GAP * 5 + PLATE_BIG_GAP;
+  const x0 = Math.round((PLATE_W - total) / 2);
+  let cx = x0;
+  for (let i = 0; i < number.length; i++) {
+    const isRegion = i === 0;
+    const glyph = plateGlyph(number[i], isRegion ? plateCjkFont(600) : plateLatinFont(600));
+    // 汉字压成 45×90mm 字格；字母数字保持原比例，过宽的压到字格宽
+    let tw = isRegion
+      ? PLATE_CELL
+      : Math.max(1, Math.round((glyph.w * PLATE_CHAR_H) / glyph.h));
+    if (!isRegion && tw > PLATE_CELL * 1.04) tw = Math.round(PLATE_CELL * 1.04);
+    stampPlateGlyph(ctx, glyph, cx, tw, PLATE_CHAR_H);
+    cx += PLATE_CELL + (i === 1 ? PLATE_BIG_GAP : PLATE_GAP);
+  }
+  const dotX = x0 + PLATE_CELL * 2 + PLATE_GAP + PLATE_BIG_GAP / 2;
+  ctx.beginPath();
+  ctx.arc(dotX, PLATE_H / 2, PLATE_DOT / 2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function plateBorderPath(ctx, inset, radius) {
+  const x = inset;
+  const y = inset;
+  const w = PLATE_W - inset * 2;
+  const h = PLATE_H - inset * 2;
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
+function drawPlateAlbedo(number) {
+  const c = plateCanvas(PLATE_W, PLATE_H);
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, PLATE_H);
+  grad.addColorStop(0, '#080a76');
+  grad.addColorStop(1, '#030356');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, PLATE_W, PLATE_H);
+  ctx.fillStyle = '#fafaf7';
+  ctx.strokeStyle = '#fafaf7';
+  ctx.lineWidth = 17; // 3.4mm 白框
+  plateBorderPath(ctx, 17, 30);
+  ctx.stroke();
+  drawPlateInk(ctx, number);
+  return c;
+}
+
+function drawPlateNormal(number) {
+  const mask = plateCanvas(PLATE_W, PLATE_H);
+  const m = mask.getContext('2d');
+  m.fillStyle = '#000';
+  m.fillRect(0, 0, PLATE_W, PLATE_H);
+  m.fillStyle = '#fff';
+  m.strokeStyle = '#fff';
+  m.lineWidth = 17;
+  plateBorderPath(m, 17, 30);
+  m.stroke();
+  drawPlateInk(m, number);
+
+  // 半分辨率足够：车牌只是微浮雕
+  const w = PLATE_W / 2;
+  const h = PLATE_H / 2;
+  const half = plateCanvas(w, h);
+  const hctx = half.getContext('2d');
+  hctx.filter = 'blur(1.6px)';
+  hctx.drawImage(mask, 0, 0, w, h);
+  hctx.filter = 'none';
+  const src = hctx.getImageData(0, 0, w, h).data;
+
+  const height = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const t = Math.min(1, Math.max(0, (src[i * 4] / 255 - 0.5) * 2.4 + 0.5));
+    height[i] = t * 0.75; // mm
+  }
+
+  const out = hctx.createImageData(w, h);
+  const pxPerMm = 2.5; // 半分辨率：1px = 0.4mm
+  for (let y = 0; y < h; y++) {
+    const yu = y > 0 ? y - 1 : y;
+    const yd = y < h - 1 ? y + 1 : y;
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const xl = x > 0 ? x - 1 : x;
+      const xr = x < w - 1 ? x + 1 : x;
+      const gx = (height[y * w + xr] - height[y * w + xl]) / (xr - xl);
+      const gy = (height[yd * w + x] - height[yu * w + x]) / (yd - yu);
+      const nx = -gx * pxPerMm;
+      const ny = -gy * pxPerMm;
+      const len = Math.hypot(nx, ny, 1);
+      const o = i * 4;
+      out.data[o] = (nx / len / 2 + 0.5) * 255;
+      out.data[o + 1] = (ny / len / 2 + 0.5) * 255;
+      out.data[o + 2] = (1 / len / 2 + 0.5) * 255;
+      out.data[o + 3] = 255;
+    }
+  }
+  const c = plateCanvas(w, h);
+  c.getContext('2d').putImageData(out, 0, 0);
+  return c;
+}
+
+function buildCnPlateMaps(number) {
+  const albedo = drawPlateAlbedo(number);
+  const normalCanvas = drawPlateNormal(number);
   const aniso = renderer.capabilities.getMaxAnisotropy();
-  const map = loader.load('textures/cn_plate_face.png');
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = aniso;
-  const normalMap = loader.load('textures/cn_plate_normal.png');
-  normalMap.anisotropy = aniso;
-  cnPlateMaps = { map, normalMap };
+  if (!cnPlateMaps) {
+    const map = new THREE.CanvasTexture(albedo);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.anisotropy = aniso;
+    const normalMap = new THREE.CanvasTexture(normalCanvas);
+    normalMap.anisotropy = aniso;
+    cnPlateMaps = { map, normalMap };
+  } else {
+    cnPlateMaps.map.image = albedo;
+    cnPlateMaps.map.needsUpdate = true;
+    cnPlateMaps.normalMap.image = normalCanvas;
+    cnPlateMaps.normalMap.needsUpdate = true;
+  }
+  cnPlateNumber = number;
+}
+
+function getCnPlateMaps() {
+  if (!cnPlateMaps) buildCnPlateMaps(cnPlateNumber);
   return cnPlateMaps;
 }
+
+// 字体就绪前先用系统字体兜底，加载完再按当前号码重绘一次
+const plateFontReady = (async () => {
+  try {
+    const face = new FontFace('PlateChar', "url('fonts/platechar.ttf')");
+    await face.load();
+    document.fonts.add(face);
+  } catch (e) {
+    console.warn('车牌字体加载失败，改用系统字体', e);
+  }
+  if (cnPlateMaps) buildCnPlateMaps(cnPlateNumber);
+})();
 
 const cnBoltGeo = new THREE.SphereGeometry(0.0095, 20, 12);
 const cnBoltMat = new THREE.MeshStandardMaterial({ color: 0xc3c8cd, metalness: 0.95, roughness: 0.25 });
@@ -2432,8 +2625,7 @@ function updateHud(car) {
 
 function updatePlateTool(car) {
   const btn = document.querySelector('.tool[data-panel="plate"]');
-  // 车牌号生成依赖开发服务器的 Python 接口，静态部署（GitHub Pages）下不提供
-  const available = car.plates && import.meta.env.DEV;
+  const available = car.plates;
   btn.hidden = !available;
   if (!available && !panels.plate.hidden) {
     panels.plate.hidden = true;
@@ -2792,51 +2984,16 @@ function buildCarSwitcher() {
   });
 }
 
-const PLATE_RE = /^[\u4e00-\u9fa5][A-Z][A-Z0-9]{5}$/;
-
-// 前后牌照共用同一对贴图，换掉纹理对象里的 image 即可同时生效
-function applyPlateNumber(text) {
-  return fetch('/api/plate-number', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  })
-    .then(async (res) => {
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '生成失败');
-      return data;
-    })
-    .then(
-      (data) =>
-        new Promise((resolve, reject) => {
-          const loader = new THREE.TextureLoader();
-          let pending = 2;
-          let failed = false;
-          const done = () => {
-            if (--pending !== 0) return;
-            if (failed) reject(new Error('贴图加载失败'));
-            else resolve();
-          };
-          const load = (url, target) => {
-            loader.load(
-              url,
-              (t) => {
-                target.image = t.image;
-                target.needsUpdate = true;
-                t.dispose();
-                done();
-              },
-              undefined,
-              () => {
-                failed = true;
-                done();
-              }
-            );
-          };
-          load(`textures/cn_plate_face.png?v=${data.ts}`, cnPlateMaps.map);
-          load(`textures/cn_plate_normal.png?v=${data.ts}`, cnPlateMaps.normalMap);
-        })
-    );
+// 前后牌照共用同一对贴图，换掉纹理对象里的 image 即可同时生效。
+// 贴图在浏览器端生成，号码只写入本机 localStorage，不上传
+async function applyPlateNumber(text) {
+  await plateFontReady;
+  buildCnPlateMaps(text);
+  try {
+    localStorage.setItem(PLATE_STORE_KEY, text);
+  } catch {
+    /* 隐私模式下不持久化，本次会话内仍然生效 */
+  }
 }
 
 function buildPlateEditor() {
@@ -2847,7 +3004,8 @@ function buildPlateEditor() {
 
   // 31 个省级地区简称，按键盘式三行排列
   const REGION_ROWS = ['京津冀晋蒙辽吉黑沪苏', '浙皖闽赣鲁豫鄂湘粤桂', '琼渝川贵云藏陕甘青宁新'];
-  let selectedRegion = '蒙';
+  let selectedRegion = cnPlateNumber[0];
+  input.value = cnPlateNumber.slice(1);
   REGION_ROWS.forEach((row) => {
     const rowEl = document.createElement('div');
     rowEl.className = 'region-row';
@@ -2872,7 +3030,7 @@ function buildPlateEditor() {
   const submit = async () => {
     const text = selectedRegion + input.value.trim().toUpperCase();
     if (!PLATE_RE.test(text)) {
-      show('后 6 位：1 个字母 + 5 位字母或数字（如 AZ8M68）', true);
+      show('后 6 位：1 个字母 + 5 位字母或数字（如 A88888）', true);
       return;
     }
     apply.disabled = true;
@@ -2880,7 +3038,7 @@ function buildPlateEditor() {
     try {
       await applyPlateNumber(text);
       input.value = text.slice(1);
-      show(`已更新为 ${text}，前后牌照同时生效`);
+      show(`已更新为 ${text}，仅在你的浏览器生效`);
     } catch (e) {
       show(e.message || '生成失败', true);
     } finally {
