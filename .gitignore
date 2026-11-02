@@ -1,0 +1,17 @@
+node_modules
+dist
+.vite
+*.log
+.DS_Store
+
+# 官方宣传册等调研资料，不在网页项目内发布
+文档/
+
+# 临时调试产物；只保留车牌生成器与字体
+.tmp/*
+!.tmp/make_plate.py
+!.tmp/zd/
+.tmp/zd/*
+!.tmp/zd/LICENSE
+!.tmp/zd/README.md
+!.tmp/zd/platechar.ttf
