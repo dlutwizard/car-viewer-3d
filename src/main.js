@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
@@ -1183,37 +1184,60 @@ function createCnRearPlate(root) {
   // 国产蓝牌直接替换尾门上的美规加州牌：位置、朝向取自美规牌实测，尺寸保持 440:140 牌面比例
   usPlateMesh.updateWorldMatrix(true, false);
   const up = usPlateMesh.geometry.attributes.position;
-  const un = usPlateMesh.geometry.attributes.normal;
   const um = usPlateMesh.matrixWorld;
-  const unm = new THREE.Matrix3().getNormalMatrix(um);
   const v = new THREE.Vector3();
-  const nv = new THREE.Vector3();
   const min = new THREE.Vector3(1e9, 1e9, 1e9);
   const max = new THREE.Vector3(-1e9, -1e9, -1e9);
-  const nsum = new THREE.Vector3();
+  const world = [];
   for (let i = 0; i < up.count; i++) {
     v.fromBufferAttribute(up, i).applyMatrix4(um);
+    world.push(v.clone());
     min.min(v);
     max.max(v);
-    nv.fromBufferAttribute(un, i).applyMatrix3(unm);
-    nsum.add(nv);
+  }
+  // 朝向和朝外面用三角面几何法线求，避免依赖 GLB 里被量化过的顶点法线
+  const idx = usPlateMesh.geometry.index;
+  const triCount = idx ? idx.count / 3 : up.count / 3;
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const nsum = new THREE.Vector3();
+  const tris = [];
+  for (let t = 0; t < triCount; t++) {
+    const i0 = idx ? idx.getX(t * 3) : t * 3;
+    const i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+    const i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+    a.copy(world[i0]);
+    b.copy(world[i1]);
+    c.copy(world[i2]);
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    const n = new THREE.Vector3().crossVectors(ab, ac);
+    const area = n.length();
+    if (area < 1e-12) continue;
+    n.divideScalar(area);
+    nsum.addScaledVector(n, area);
+    tris.push({ i0, i1, i2, n });
   }
   nsum.normalize();
+  // 牌面深度取美规牌朝外面顶点均值：牌面带倾角，包围盒 max.z 会把蓝牌埋进凹槽约 3cm，被凹槽上沿斜面挡住
+  const fsum = new THREE.Vector3();
+  const sel = new Set();
+  for (const tri of tris) {
+    if (tri.n.dot(nsum) <= 0.5) continue;
+    for (const i of [tri.i0, tri.i1, tri.i2]) {
+      if (sel.has(i)) continue;
+      sel.add(i);
+      fsum.add(world[i]);
+    }
+  }
+  const fcnt = sel.size;
+  if (fcnt) fsum.divideScalar(fcnt);
   // 牌照比凹槽更宽更矮，接近真实蓝牌观感；字带仍按 440:140 真实比例居中
   const plateW = 0.6;
   const plateH = 0.21;
-  // 牌面深度取美规牌朝外面顶点均值：牌面带倾角，包围盒 max.z 会把蓝牌埋进凹槽约 3cm，被凹槽上沿斜面挡住
-  const fsum = new THREE.Vector3();
-  let fcnt = 0;
-  for (let i = 0; i < up.count; i++) {
-    v.fromBufferAttribute(up, i).applyMatrix4(um);
-    nv.fromBufferAttribute(un, i).applyMatrix3(unm);
-    if (nv.dot(nsum) > 0.5) {
-      fsum.add(v);
-      fcnt++;
-    }
-  }
-  if (fcnt) fsum.divideScalar(fcnt);
   // 车牌面（Box 的 -z 面）正好落到美规牌朝外面的实测平面上，与凹槽保持美规牌原有的贴合深度
   group.position.set(
     (min.x + max.x) / 2,
@@ -2379,10 +2403,13 @@ function setupCar(gltf, car) {
   paintMat = paintMats[0] || null;
 }
 
+const gltfLoader = new GLTFLoader();
+gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+
 function loadCarGltf(car) {
   if (carLoads.has(car.id)) return carLoads.get(car.id);
   const p = new Promise((resolve, reject) => {
-    new GLTFLoader().load(
+    gltfLoader.load(
       car.glb,
       resolve,
       (ev) => {
