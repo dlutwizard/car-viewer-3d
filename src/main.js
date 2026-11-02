@@ -3005,7 +3005,7 @@ function makeCarCard(car, i) {
     () => thumb.classList.add('ready'),
     { once: true }
   );
-  b.addEventListener('click', () => chooseCar(car.id));
+  b.addEventListener('click', () => switchCar(car.id));
   return b;
 }
 
@@ -3014,67 +3014,6 @@ function buildCarSwitcher() {
   if (!nav) return;
   nav.innerHTML = '';
   CARS.forEach((car, i) => nav.appendChild(makeCarCard(car, i)));
-}
-
-function buildPicker() {
-  const grid = document.getElementById('pickerGrid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  CARS.forEach((car, i) => grid.appendChild(makeCarCard(car, i)));
-}
-
-let started = false;
-let starting = false;
-
-function chooseCar(id) {
-  if (started) return switchCar(id);
-  if (!starting) startViewer(id);
-}
-
-// 首屏选车后才会加载第一辆车的 GLB，避免一打开就下载几十 MB 模型
-async function startViewer(id) {
-  const car = CARS.find((c) => c.id === id);
-  if (!car) return;
-  starting = true;
-  document.getElementById('picker').classList.add('hide');
-  document.body.classList.remove('picking');
-  showLoader(car.name);
-
-  try {
-    await envReady;
-    const gltf = await loadCarGltf(car);
-    setupCar(gltf, car);
-    currentCarId = car.id;
-    carCache.set(currentCarId, {
-      root: carRoot,
-      dims: { ...dims },
-      paintMats: [...paintMats],
-      paintId: null,
-    });
-    updateHud(car);
-    updatePlateTool(car);
-    buildPaintSwatches(car);
-    setCarCardState(currentCarId, '');
-    applyLight('studio');
-    applyPaint(car.paints[0].id);
-    generateThumb(currentCarId);
-    placeInstant(VIEWS.find((v) => v.id === 'rear'));
-    setProgress(1);
-    setTimeout(() => {
-      loader.classList.add('hide');
-      setTimeout(() => (loader.style.display = 'none'), 600);
-      setTimeout(() => hint.classList.add('hide'), 9000);
-    }, 350);
-    setAutoRotate(false);
-    started = true;
-  } catch (e) {
-    console.error(e);
-    loader.classList.add('hide');
-    setTimeout(() => (loader.style.display = 'none'), 600);
-    document.getElementById('picker').classList.remove('hide');
-    document.body.classList.add('picking');
-  }
-  starting = false;
 }
 
 // 前后牌照共用同一对贴图，换掉纹理对象里的 image 即可同时生效。
@@ -3187,7 +3126,36 @@ window.addEventListener('resize', () => {
 buildUi();
 buildPlateEditor();
 buildCarSwitcher();
-buildPicker();
+updatePlateTool(CARS[0]);
+buildPaintSwatches(CARS[0]);
+
+Promise.all([
+  envReady,
+  loadCarGltf(CARS[0]).then((gltf) => setupCar(gltf, CARS[0])),
+])
+  .then(() => {
+    currentCarId = CARS[0].id;
+    carCache.set(currentCarId, {
+      root: carRoot,
+      dims: { ...dims },
+      paintMats: [...paintMats],
+      paintId: null,
+    });
+    updateHud(CARS[0]);
+    setCarCardState(currentCarId, '');
+    applyLight('studio');
+    applyPaint(CARS[0].paints[0].id);
+    generateThumb(currentCarId);
+    placeInstant(VIEWS.find((v) => v.id === 'rear'));
+    setProgress(1);
+    setTimeout(() => {
+      loader.classList.add('hide');
+      setTimeout(() => (loader.style.display = 'none'), 600);
+      setTimeout(() => hint.classList.add('hide'), 9000);
+    }, 350);
+    setAutoRotate(false);
+  })
+  .catch((e) => console.error(e));
 
 renderer.setAnimationLoop(() => {
   const dt = getDelta();
