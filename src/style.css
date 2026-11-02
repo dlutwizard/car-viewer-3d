@@ -874,27 +874,8 @@ body.picking .loader {
   text-align: center;
 }
 
-.picker-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.42em;
-  text-indent: 0.42em;
-  color: var(--accent);
-}
-
-.picker-eyebrow::before {
-  content: "";
-  width: 18px;
-  height: 1px;
-  background: currentColor;
-  opacity: 0.7;
-}
-
 .picker-title {
-  margin: 14px 0 0;
+  margin: 0;
   font-size: clamp(22px, 3vw, 30px);
   font-weight: 600;
   letter-spacing: 0.16em;
