@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
@@ -2403,6 +2405,11 @@ function setupCar(gltf, car) {
 }
 
 const gltfLoader = new GLTFLoader();
+gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+const ktx2Loader = new KTX2Loader()
+  .setTranscoderPath(`${import.meta.env.BASE_URL}basis/`)
+  .detectSupport(renderer);
+gltfLoader.setKTX2Loader(ktx2Loader);
 
 // GitHub Pages 单连接会被限速到几十 KB/s，分块并行能成倍提速；
 // 分块小一些、并发有线，单条流被中断时只重试那一块
