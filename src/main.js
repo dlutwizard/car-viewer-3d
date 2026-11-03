@@ -2441,20 +2441,37 @@ async function readBody(res, onBytes) {
 }
 
 async function fetchGlbParallel(url, onProgress) {
-  const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+  let probe;
+  for (let attempt = 0; attempt < 3 && !probe; attempt++) {
+    try {
+      probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+    } catch {
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+  if (!probe) throw new Error('模型请求失败');
   const range = probe.headers.get('Content-Range') || '';
   const total = Number(range.split('/')[1]) || 0;
   if (probe.status !== 206 || !total) {
-    const res = probe.ok ? probe : await fetch(url);
-    if (!res.ok) throw new Error(`模型请求失败 ${res.status}`);
-    const len = Number(res.headers.get('Content-Length')) || 0;
-    let loaded = 0;
-    const buf = await readBody(res, (n) => {
-      loaded += n;
-      if (len) onProgress(loaded, len);
-    });
-    if (!len) onProgress(loaded, loaded);
-    return buf;
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = attempt === 0 ? probe : await fetch(url);
+        if (!res.ok) throw new Error(`模型请求失败 ${res.status}`);
+        const len = Number(res.headers.get('Content-Length')) || 0;
+        let loaded = 0;
+        const buf = await readBody(res, (n) => {
+          loaded += n;
+          if (len) onProgress(loaded, len);
+        });
+        if (!len) onProgress(loaded, loaded);
+        return buf;
+      } catch (err) {
+        lastErr = err;
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+      }
+    }
+    throw lastErr;
   }
   await probe.arrayBuffer();
   const ranges = [];
