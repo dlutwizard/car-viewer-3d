@@ -2406,27 +2406,100 @@ function setupCar(gltf, car) {
 const gltfLoader = new GLTFLoader();
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 
+// GitHub Pages 单连接会被限速到几十 KB/s，分片并行能成倍提速
+const GLB_PARTS = 8;
+
+async function readBody(res, onBytes) {
+  if (!res.body) {
+    const buf = await res.arrayBuffer();
+    onBytes(buf.byteLength);
+    return buf;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onBytes(value.byteLength);
+  }
+  const out = new Uint8Array(loaded);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out.buffer;
+}
+
+async function fetchGlbParallel(url, onProgress) {
+  const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+  const range = probe.headers.get('Content-Range') || '';
+  const total = Number(range.split('/')[1]) || 0;
+  if (probe.status !== 206 || !total) {
+    const res = probe.ok ? probe : await fetch(url);
+    if (!res.ok) throw new Error(`模型请求失败 ${res.status}`);
+    const len = Number(res.headers.get('Content-Length')) || 0;
+    let loaded = 0;
+    const buf = await readBody(res, (n) => {
+      loaded += n;
+      if (len) onProgress(loaded, len);
+    });
+    if (!len) onProgress(loaded, loaded);
+    return buf;
+  }
+  await probe.arrayBuffer();
+  const partSize = Math.ceil(total / GLB_PARTS);
+  let loaded = 0;
+  const parts = await Promise.all(
+    Array.from({ length: GLB_PARTS }, (_, i) => {
+      const start = i * partSize;
+      const end = Math.min(total, start + partSize) - 1;
+      if (start > end) return null;
+      return fetch(url, { headers: { Range: `bytes=${start}-${end}` } }).then(async (res) => {
+        if (res.status !== 206) throw new Error(`分片 ${i} 返回 ${res.status}`);
+        const buf = await readBody(res, (n) => {
+          loaded += n;
+          onProgress(loaded, total);
+        });
+        if (buf.byteLength !== end - start + 1) throw new Error(`分片 ${i} 长度异常`);
+        return { start, buf };
+      });
+    })
+  );
+  const all = new Uint8Array(total);
+  for (const part of parts) {
+    if (part) all.set(new Uint8Array(part.buf), part.start);
+  }
+  return all.buffer;
+}
+
 function loadCarGltf(car) {
   if (carLoads.has(car.id)) return carLoads.get(car.id);
-  const p = new Promise((resolve, reject) => {
-    gltfLoader.load(
-      car.glb,
-      resolve,
-      (ev) => {
-        if (ev.total > 0) {
-          setProgress(0.02 + (ev.loaded / ev.total) * 0.9);
-        } else {
-          setProgress(Math.min(0.9, 0.02 + ev.loaded / 27e6));
-        }
-      },
-      (err) => {
-        console.error(err);
-        loaderErr.hidden = false;
-        loaderErr.textContent = '模型加载失败，请重试';
-        reject(err);
-      }
-    );
-  }).finally(() => carLoads.delete(car.id));
+  const p = fetchGlbParallel(car.glb, (loaded, total) => {
+    setProgress(0.02 + (loaded / total) * 0.88);
+  })
+    .then(
+      (buffer) =>
+        new Promise((resolve, reject) => {
+          const base = car.glb.replace(/[^/]*$/, '');
+          gltfLoader.parse(buffer, base, resolve, (err) => {
+            console.error(err);
+            loaderErr.hidden = false;
+            loaderErr.textContent = '模型加载失败，请重试';
+            reject(err);
+          });
+        })
+    )
+    .catch((err) => {
+      console.error(err);
+      loaderErr.hidden = false;
+      loaderErr.textContent = '模型加载失败，请重试';
+      throw err;
+    })
+    .finally(() => carLoads.delete(car.id));
   carLoads.set(car.id, p);
   return p;
 }
