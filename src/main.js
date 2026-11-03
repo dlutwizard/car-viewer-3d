@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
@@ -2405,6 +2406,9 @@ function setupCar(gltf, car) {
 
 const gltfLoader = new GLTFLoader();
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
+gltfLoader.setDRACOLoader(dracoLoader);
 
 // GitHub Pages 单连接会被限速到几十 KB/s，分块并行能成倍提速；
 // 分块小一些、并发有线，单条流被中断时只重试那一块
