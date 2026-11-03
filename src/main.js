@@ -2406,8 +2406,10 @@ function setupCar(gltf, car) {
 const gltfLoader = new GLTFLoader();
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 
-// GitHub Pages 单连接会被限速到几十 KB/s，分片并行能成倍提速
-const GLB_PARTS = 8;
+// GitHub Pages 单连接会被限速到几十 KB/s，分块并行能成倍提速；
+// 分块小一些、并发有线，单条流被中断时只重试那一块
+const GLB_CONNECTIONS = 6;
+const GLB_CHUNK = 1 << 20;
 
 async function readBody(res, onBytes) {
   if (!res.body) {
@@ -2451,23 +2453,45 @@ async function fetchGlbParallel(url, onProgress) {
     return buf;
   }
   await probe.arrayBuffer();
-  const partSize = Math.ceil(total / GLB_PARTS);
+  const ranges = [];
+  for (let s = 0; s < total; s += GLB_CHUNK) {
+    ranges.push([s, Math.min(total, s + GLB_CHUNK) - 1]);
+  }
+  const parts = new Array(ranges.length);
   let loaded = 0;
-  const parts = await Promise.all(
-    Array.from({ length: GLB_PARTS }, (_, i) => {
-      const start = i * partSize;
-      const end = Math.min(total, start + partSize) - 1;
-      if (start > end) return null;
-      return fetch(url, { headers: { Range: `bytes=${start}-${end}` } }).then(async (res) => {
-        if (res.status !== 206) throw new Error(`分片 ${i} 返回 ${res.status}`);
-        const buf = await readBody(res, (n) => {
-          loaded += n;
-          onProgress(loaded, total);
-        });
-        if (buf.byteLength !== end - start + 1) throw new Error(`分片 ${i} 长度异常`);
-        return { start, buf };
-      });
-    })
+  let next = 0;
+
+  async function fetchRange(start, end) {
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+        if (res.status !== 206) throw new Error(`分块返回 ${res.status}`);
+        const buf = await readBody(res, () => {});
+        if (buf.byteLength !== end - start + 1) throw new Error('分块长度异常');
+        return buf;
+      } catch (err) {
+        lastErr = err;
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
+    throw lastErr;
+  }
+
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= ranges.length) return;
+      const [start, end] = ranges[i];
+      const buf = await fetchRange(start, end);
+      parts[i] = { start, buf };
+      loaded += end - start + 1;
+      onProgress(loaded, total);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(GLB_CONNECTIONS, ranges.length) }, worker)
   );
   const all = new Uint8Array(total);
   for (const part of parts) {
