@@ -264,6 +264,28 @@ const CARS = [
     plates: true,
     setup: setupSharanMaterials,
   },
+  {
+    id: 'tiida',
+    name: '日产骐达',
+    mark: 'TIIDA',
+    sub: '2017',
+    glb: 'models/2017_Nissan_Tiida_full.glb',
+    yaw: 0,
+    paintMats: ['tiida_paint'],
+    glassMats: ['tiida_window'],
+    paints: [
+      {
+        id: 'lime',
+        market: 'cn',
+        name: '荧光绿（原模型色）',
+        color: '#b8d037',
+        metalness: 0.3,
+        roughness: 0.35,
+        env: 1.2,
+      },
+    ],
+    plates: false,
+  },
 ];
 
 /* ---------- dom ---------- */
